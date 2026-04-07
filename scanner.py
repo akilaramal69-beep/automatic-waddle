@@ -195,30 +195,43 @@ class Scanner:
                             accounts.append(str(ak))
 
                     instructions = message.get("instructions", [])
+                    # --- Robust Extraction ---
+                    # 1. Look for SPL Token InitializeMint instructions (Most reliable)
+                    all_instructions = instructions.copy()
+                    inner_ixs = tx.get("meta", {}).get("innerInstructions", [])
+                    for inner in inner_ixs:
+                        all_instructions.extend(inner.get("instructions", []))
 
+                    for ix in all_instructions:
+                        parsed = ix.get("parsed")
+                        if isinstance(parsed, dict) and parsed.get("type") in ["initializeMint", "initializeMint2"]:
+                            info = parsed.get("info", {})
+                            mint = info.get("mint")
+                            if mint:
+                                logger.info(f"✨ Found Mint via SPL: {mint[:15]}...")
+                                return {
+                                    "mint": mint,
+                                    "creator": info.get("mintAuthority") or signature[:44],
+                                    "bonding_curve": None
+                                }
+
+                    # 2. Fallback: Parse Pump.fun 'create' instruction directly
                     for ix in instructions:
-                        if isinstance(ix, dict):
-                            program_id_idx = ix.get("programIdIndex", ix.get("programId"))
-
-                            if isinstance(program_id_idx, int) and program_id_idx < len(accounts):
-                                program_id = accounts[program_id_idx]
-                            else:
-                                program_id = str(program_id_idx) if program_id_idx else ""
-
-                            if "6EF8" in str(program_id):
-                                accts = ix.get("accounts", [])
-                                if isinstance(accts, list) and len(accts) >= 2:
-                                    mint = str(accts[0]) if len(str(accts[0])) >= 32 else None
-                                    creator = str(accts[1]) if len(str(accts[1])) >= 32 else None
-
-                                    if mint and (creator or len(accts) > 1):
-                                        if not creator:
-                                            creator = str(accts[2]) if len(accts) > 2 else signature[:44]
-                                        return {
-                                            "mint": mint,
-                                            "creator": creator,
-                                            "bonding_curve": str(accts[3]) if len(accts) > 3 else None
-                                        }
+                        p_id_idx = ix.get("programIdIndex")
+                        p_id = accounts[p_id_idx] if isinstance(p_id_idx, int) and p_id_idx < len(accounts) else str(ix.get("programId", ""))
+                        
+                        if config.PUMP_FUN_PROGRAM[:8] in str(p_id):
+                            ix_accounts = ix.get("accounts", [])
+                            if len(ix_accounts) >= 10:
+                                # Pump.fun: [mint, mint_auth, bonding, assoc_bonding, global, spl, system, rent, fee, creator]
+                                mint = accounts[ix_accounts[0]] if isinstance(ix_accounts[0], int) else str(ix_accounts[0])
+                                creator = accounts[ix_accounts[9]] if isinstance(ix_accounts[9], int) else str(ix_accounts[9])
+                                bonding = accounts[ix_accounts[2]] if isinstance(ix_accounts[2], int) else str(ix_accounts[2])
+                                return {
+                                    "mint": mint,
+                                    "creator": creator,
+                                    "bonding_curve": bonding
+                                }
 
         except Exception as e:
             logger.error(f"Failed to extract tx data: {e}")
