@@ -38,42 +38,52 @@ class AlgoScorer:
     async def score_token(self, pump_token) -> Dict[str, Any]:
         session = await self._get_session()
 
+        # 1. Authority Check
         has_mint_auth = await self._check_mint_authority(pump_token.mint, session)
         if has_mint_auth:
             return {
                 "score": 0,
                 "risk_factors": ["Mint authority detected - honeypot risk"],
                 "has_mint_authority": True,
-                "dev_holding_pct": 0
+                "dev_holding_pct": 0,
+                "creator_history": {"coins_per_hour": 0, "recent_coins": []}
             }
 
-        dev_buy_pct = await self._calculate_dev_buy_percentage(
-            pump_token.mint, 
+        # 2. Dev Current Holding Check (Modern way)
+        dev_holding_pct = await self._check_dev_token_balance(
+            pump_token.mint,
             pump_token.creator,
             session
         )
 
+        # 3. Creator History Check (Previous coins)
         creator_history = await self._check_creator_history(
             pump_token.creator,
             pump_token.timestamp,
             session
         )
 
+        # 4. Final Scoring Logic
         score = self._calculate_final_score(
-            dev_buy_pct,
+            dev_holding_pct,
             creator_history,
             pump_token
         )
 
         return {
             "score": score,
-            "risk_factors": self._get_risk_factors(dev_buy_pct, creator_history),
+            "risk_factors": self._get_risk_factors(dev_holding_pct, creator_history),
             "has_mint_authority": has_mint_auth,
-            "dev_holding_pct": dev_buy_pct,
+            "dev_holding_pct": dev_holding_pct,
             "creator_history": creator_history
         }
 
     async def _check_mint_authority(self, mint: str, session: aiohttp.ClientSession) -> bool:
+        """
+        Checks if the SPL mint authority is still present (not renounced).
+        Standard SPL Mint layout: first 36 bytes contains COption (4 bytes) + Pubkey (32 bytes).
+        If COption is 0, authority is None (renounced).
+        """
         try:
             url = f"{config.RPC_URL}?api-key={config.HELIUS_API_KEY}"
             async with session.post(url, json={
@@ -86,55 +96,55 @@ class AlgoScorer:
                 ]
             }) as resp:
                 data = await resp.json()
-                if "result" in data and data["result"]:
-                    account = data["result"]["data"][0]
-                    if len(account) > 32:
-                        return False
+                if "result" in data and data["result"] and data["result"]["value"]:
+                    account_data = data["result"]["value"]["data"][0]
+                    import base64
+                    raw_data = base64.b64decode(account_data)
+                    
+                    if len(raw_data) >= 36:
+                        # First 4 bytes is COption (u32)
+                        import struct
+                        option = struct.unpack("<I", raw_data[:4])[0]
+                        return option == 1 # 1 means authority exists
         except Exception as e:
             logger.debug(f"Mint authority check failed: {e}")
         return False
 
-    async def _calculate_dev_buy_percentage(
+    async def _check_dev_token_balance(
         self, 
         mint: str, 
         creator: str,
         session: aiohttp.ClientSession
     ) -> float:
+        """
+        Checks the creator's current balance of the token using getParsedTokenAccountsByOwner.
+        Returns percentage of total supply (assumed 1B for Pump.fun tokens).
+        """
         try:
             url = f"{config.RPC_URL}?api-key={config.HELIUS_API_KEY}"
             async with session.post(url, json={
                 "jsonrpc": "2.0",
                 "id": 1,
-                "method": "getSignaturesForAddress",
+                "method": "getTokenAccountsByOwner",
                 "params": [
                     creator,
-                    {"limit": 5}
+                    {"mint": mint},
+                    {"encoding": "jsonParsed"}
                 ]
             }) as resp:
                 data = await resp.json()
-
-                if "result" not in data:
-                    return 0.0
-
-                total_dev_buys = 0
-                tx_count = 0
-
-                for sig_info in data["result"][:5]:
-                    tx_data = await self._get_transaction_details(
-                        sig_info["signature"],
-                        session
-                    )
-
-                    if tx_data:
-                        dev_buy = self._extract_dev_buy_from_tx(tx_data, mint, creator)
-                        total_dev_buys += dev_buy
-                        tx_count += 1
-
-                if tx_count > 0:
-                    return min(total_dev_buys / tx_count, 1.0)
-
+                if "result" in data and data["result"]["value"]:
+                    total_amount = 0
+                    for account in data["result"]["value"]:
+                        info = account["account"]["data"]["parsed"]["info"]
+                        token_amount = info["tokenAmount"]
+                        total_amount += float(token_amount["uiAmount"])
+                    
+                    # Pump.fun tokens typically have 1B total supply
+                    return total_amount / 1_000_000_000
+                    
         except Exception as e:
-            logger.debug(f"Dev buy calculation error: {e}")
+            logger.debug(f"Dev balance check failed: {e}")
         return 0.0
 
     async def _get_transaction_details(self, signature: str, session: aiohttp.ClientSession) -> Optional[Dict]:

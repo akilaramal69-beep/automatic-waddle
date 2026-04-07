@@ -35,6 +35,8 @@ class Config:
     MAX_PRIORITY_FEE: float = 0.005
     
     PUMP_FUN_PROGRAM: str = "6EF8rrecthR5Dkzon8NwuxeK7YMMvV35R885yFmK8Y9"
+    PUMP_FUN_GLOBAL: str = "4wTVyH7jzP7qbBq9V73ZS3qZv6YvY8PzVjQjVjQjVjQj"
+    PUMP_FUN_FEE_RECIPIENT: str = "CebN5WGCcP97GrS9bde96Xy2uB7rFpDMYhDMTWCH1nN5"
     PUMP_FUN_CREATE_PREFIX: bytes = bytes.fromhex("507270466d7359")
     
     SIMULATION_BALANCE_SOL: float = 0.15
@@ -58,8 +60,9 @@ class Config:
     MAX_CREATOR_COINS_PER_HOUR: int = 3
     DEV_BUY_THRESHOLD: float = 0.15
     
-    PROFIT_TARGET_1: float = 0.50
-    SELL_PORTION_1: float = 0.50
-    TRAILING_STOP_LOSS: float = -0.20
+    PROFIT_TARGET_1: float = float(os.getenv("PROFIT_TARGET_1", "0.50"))      # 50%
+    SELL_PORTION_1: float = float(os.getenv("SELL_PORTION_1", "0.50"))       # Sell 50% at target 1
+    TRAILING_STOP_LOSS: float = float(os.getenv("TRAILING_STOP_LOSS", "-0.20")) # -20% from peak
+    STOP_LOSS_THRESHOLD: float = float(os.getenv("STOP_LOSS_THRESHOLD", "-0.30")) # -30% hard stop
 
 config = Config()

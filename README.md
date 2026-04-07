@@ -88,6 +88,16 @@ cp .env.example .env
 SIMULATION_MODE=true python main.py
 ```
 
+## Testing the Scoring Logic
+
+You can manually test how the bot "thinks" by scoring any existing token:
+
+```bash
+python test_score.py <MINT_ADDRESS> <CREATOR_ADDRESS>
+```
+
+This will perform the same checks (Mint Authority, Dev Balance, Creator History) that the bot uses during live scanning and print a detailed risk report.
+
 ## Docker
 
 ```bash
