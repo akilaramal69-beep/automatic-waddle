@@ -1,0 +1,12 @@
+services:
+  sniper-bot:
+    build: .
+    restart: always
+    environment:
+      - HELIUS_API_KEY=${HELIUS_API_KEY}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - WALLET_PRIVATE_KEY=${WALLET_PRIVATE_KEY}
+      - RPC_URL=${RPC_URL:-https://mainnet.helius-rpc.com}
+      - WSS_URL=${WSS_URL:-wss://mainnet.helius-rpc.com}
+      - SIMULATION_MODE=${SIMULATION_MODE:-false}
