@@ -7,10 +7,12 @@ Uses Helius WebSocket for high-speed log subscription
 import asyncio
 import base64
 import logging
+import os
 import re
+import secrets
 import time
 from dataclasses import dataclass
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Callable
 import aiohttp
 from solders.pubkey import Pubkey
 
@@ -40,33 +42,41 @@ class Scanner:
         self.running = False
         self.scanned_tokens: Dict[str, PumpToken] = {}
         self.token_callback = callback
+        self.simulation_mode = False
 
     async def start(self):
-        await self._connect_websocket()
+        """Always connect to real Helius WebSocket — sim mode only affects trade execution."""
         self.running = True
-        asyncio.create_task(self._heartbeat())
+        try:
+            await self._connect_websocket()
+            asyncio.create_task(self._heartbeat())
+            logger.info("WebSocket scanner started (real token detection)")
+        except Exception as e:
+            logger.error(f"WebSocket connect failed: {e} — scanner will retry on first process_logs call")
 
     async def _connect_websocket(self):
-        headers = {"x-api-key": config.HELIUS_API_KEY}
+        if self.session and not self.session.closed:
+            await self.session.close()
         self.session = aiohttp.ClientSession()
 
         ws_url = f"{config.WSS_URL}?api-key={config.HELIUS_API_KEY}"
-        self.ws = await self.session.ws_connect(ws_url)
+        logger.info(f"Connecting WebSocket to Helius...")
+        self.ws = await self.session.ws_connect(ws_url, heartbeat=30)
 
+        # params MUST be an array per Solana JSON-RPC spec
         subscribe_msg = {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "logsSubscribe",
-            "params": {
-                "filter": {
-                    "mentions": [config.PUMP_FUN_PROGRAM]
-                }
-            }
+            "params": [
+                {"mentions": [config.PUMP_FUN_PROGRAM]},
+                {"commitment": "processed"}
+            ]
         }
         await self.ws.send_json(subscribe_msg)
 
         response = await self.ws.receive_json()
-        logger.info(f"Sub response: {response}")
+        logger.info(f"Helius logsSubscribe response: {response}")
         logger.info("WebSocket connected to Helius logsSubscribe")
 
     async def _heartbeat(self):
@@ -200,15 +210,31 @@ class Scanner:
         return None
 
     async def process_logs(self):
+        """Process real Helius WebSocket logs with auto-reconnect."""
         last_heartbeat = time.time()
         last_token_log = time.time()
+
         while self.running:
+            # Reconnect if WS is dead
+            if not self.ws or self.ws.closed:
+                logger.warning("WebSocket closed — reconnecting in 5s...")
+                await asyncio.sleep(5)
+                try:
+                    await self._connect_websocket()
+                except Exception as e:
+                    logger.error(f"Reconnect failed: {e}")
+                    continue
+
             try:
-                msg = await self.ws.receive()
+                msg = await asyncio.wait_for(self.ws.receive(), timeout=60)
 
                 if time.time() - last_heartbeat > 60:
-                    logger.info(f"[SCANNER] Still alive...")
+                    logger.info("[SCANNER] Alive — waiting for Pump.fun token launches...")
                     last_heartbeat = time.time()
+
+                if msg.type == aiohttp.WSMsgType.CLOSED or msg.type == aiohttp.WSMsgType.ERROR:
+                    logger.warning(f"WS message type {msg.type} — will reconnect")
+                    continue
 
                 if msg.type == aiohttp.WSMsgType.TEXT:
                     data = msg.json()
@@ -221,12 +247,14 @@ class Scanner:
                                 logs = value_data.get("logs", [])
                                 signature = value_data.get("signature", "")
 
-                                if logs and signature and time.time() - last_token_log > 5:
+                                if logs and signature:
                                     create_count = sum(1 for l in logs if "Create" in str(l))
                                     pump_count = sum(1 for l in logs if "6EF8" in str(l))
 
-                                    if pump_count > 2 and create_count > 0:
-                                        logger.info(f"Potential new token! pump_logs:{pump_count} create:{create_count}")
+                                    logger.debug(f"TX {signature[:16]}... pump:{pump_count} create:{create_count}")
+
+                                    if pump_count > 0 and create_count > 0 and time.time() - last_token_log > 5:
+                                        logger.info(f"🔍 Potential new token! pump_logs:{pump_count} create:{create_count}")
                                         last_token_log = time.time()
 
                                         token_info = await self._extract_from_transaction(signature, logs)
@@ -234,11 +262,52 @@ class Scanner:
                                             logger.info(f"Extracted mint: {token_info['mint'][:20]}...")
                                             await self._handle_new_token(token_info)
 
+            except asyncio.TimeoutError:
+                # No message in 60s — just log and loop
+                logger.info("[SCANNER] Alive — no new tokens in last 60s")
+                last_heartbeat = time.time()
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"Log processing error: {e}")
-                await asyncio.sleep(1)
+                await asyncio.sleep(2)
+
+    async def run_simulation_loop(self, interval_seconds: int = 60):
+        """Generate mock token events in simulation mode so trades actually trigger."""
+        logger.info(f"[SIM] Mock token generator started — firing every {interval_seconds}s")
+        await asyncio.sleep(10)  # brief startup delay
+
+        known_mints = [
+            "So11111111111111111111111111111111111111112",
+            "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+            "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+        ]
+
+        while self.running:
+            try:
+                # Generate a random-looking mint address
+                rand_hex = secrets.token_hex(16)
+                fake_mint = known_mints[int(rand_hex[:2], 16) % len(known_mints)]
+                # Use first known mint as a stable real address for price lookups
+                fake_mint = known_mints[0]
+
+                fake_creator = "Auth" + rand_hex[:8].upper() + "1111111111111111111111111"
+
+                token_info = {
+                    "mint": fake_mint,
+                    "creator": fake_creator[:44],
+                    "bonding_curve": fake_mint,
+                }
+
+                logger.info(f"[SIM] 🪙 Injecting mock token: {fake_mint[:20]}...")
+                # Clear from cache so it scores fresh each time
+                self.scanned_tokens.pop(fake_mint, None)
+                await self._handle_new_token(token_info)
+
+            except Exception as e:
+                logger.error(f"[SIM] Mock token error: {e}")
+
+            await asyncio.sleep(interval_seconds)
 
     async def _handle_new_token(self, token_info):
         mint = token_info["mint"]

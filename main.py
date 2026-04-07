@@ -45,7 +45,21 @@ async def start_health_server():
 
 class SniperBot:
     def __init__(self):
-        self.wallet = Wallet(config.WALLET_PRIVATE_KEY)
+        # In simulation mode a real wallet key is not required
+        if config.SIMULATION_MODE and not config.WALLET_PRIVATE_KEY:
+            from solders.keypair import Keypair
+            _dummy = Keypair()  # ephemeral keypair for sim
+            # Patch wallet directly
+            class _DummyWallet:
+                keypair = _dummy
+                public_key = _dummy.pubkey()
+                address = str(_dummy.pubkey())
+                def sign(self, msg): return bytes(_dummy.sign_message(msg))
+            self.wallet = _DummyWallet()
+            logger.info("[SIM] Using ephemeral wallet (no WALLET_PRIVATE_KEY set)")
+        else:
+            self.wallet = Wallet(config.WALLET_PRIVATE_KEY)
+
         self.algo = AlgoScorer()
         self.trade = TradeExecutor(self.wallet)
         self.scanner = Scanner(self.algo)
@@ -55,6 +69,7 @@ class SniperBot:
         self.trade.simulation_mode = config.SIMULATION_MODE
         self.trade.simulated_balance = config.SIMULATION_BALANCE_SOL
         self.telegram.simulation_mode = config.SIMULATION_MODE
+        self.scanner.simulation_mode = config.SIMULATION_MODE  # tell scanner its mode
 
     async def start(self):
         mode = "🎮 SIMULATION" if self.trade.simulation_mode else "💰 LIVE"
@@ -77,6 +92,7 @@ class SniperBot:
         await self.scanner.start()
         self.scanner.token_callback = self.handle_token
 
+        # Real scanner loop in ALL modes — sim mode only differs in trade execution
         asyncio.create_task(self._scanner_loop())
         asyncio.create_task(self._status_reporter())
         asyncio.create_task(self.telegram.poll_updates())
@@ -188,12 +204,16 @@ async def main():
         await bot.stop()
 
 if __name__ == "__main__":
+    # HELIUS_API_KEY is always required — sim mode uses the real WebSocket for token detection
     if not config.HELIUS_API_KEY:
-        print("ERROR: HELIUS_API_KEY not set")
+        print("ERROR: HELIUS_API_KEY not set (required even in simulation mode for real token detection)")
         sys.exit(1)
 
-    if not config.WALLET_PRIVATE_KEY:
-        print("ERROR: WALLET_PRIVATE_KEY not set")
+    if not config.SIMULATION_MODE and not config.WALLET_PRIVATE_KEY:
+        print("ERROR: WALLET_PRIVATE_KEY not set (required for live trading)")
         sys.exit(1)
+
+    if config.SIMULATION_MODE:
+        logger.info("[SIM] Starting in SIMULATION mode — real token detection, no real funds used")
 
     asyncio.run(main())
