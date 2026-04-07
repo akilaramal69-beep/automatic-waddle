@@ -35,7 +35,7 @@ class Config:
     MIN_PRIORITY_FEE: float = 0.0001
     MAX_PRIORITY_FEE: float = 0.005
     
-    PUMP_FUN_PROGRAM: str = "6EF8rrecthR5Dkzon8NwuxeK7YMMvV35R885yFmK8Y9"
+    PUMP_FUN_PROGRAM: str = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
     PUMP_FUN_GLOBAL: str = "4wTVyH7jzP7qbBq9V73ZS3qZv6YvY8PzVjQjVjQjVjQj"
     PUMP_FUN_FEE_RECIPIENT: str = "CebN5WGCcP97GrS9bde96Xy2uB7rFpDMYhDMTWCH1nN5"
     PUMP_FUN_CREATE_PREFIX: bytes = bytes.fromhex("507270466d7359")

@@ -333,10 +333,12 @@ class Scanner:
                     if value.get("err"):
                         continue
 
-                    # --- Detect Token Creation ---
-                    logs_str = " ".join(str(l) for l in logs)
-                    if any(kw in logs_str for kw in ["Instruction: Create", "InitializeMint", "initialize_mint", "CreateToken"]):
-                        logger.info(f"🔍 [LOGS] {signature[:10]}... NEW TOKEN CANDIDATE")
+                    # --- Detect Token Creation (Improved logic from reference repo) ---
+                    pump_count = sum(1 for l in logs if config.PUMP_FUN_PROGRAM[:4] in str(l))
+                    create_count = sum(1 for l in logs if "Create" in str(l))
+
+                    if pump_count >= 2 and create_count > 0:
+                        logger.info(f"🔍 [MATCH] {signature[:10]}... NEW TOKEN CANDIDATE (Pump:{pump_count} Create:{create_count})")
                         await self.process_log_entry(value)
                     else:
                         if self.total_logs_received % 100 == 0:
