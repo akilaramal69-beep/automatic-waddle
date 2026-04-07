@@ -75,18 +75,17 @@ class Scanner:
         )
         logger.info("WebSocket TCP connection established")
 
-        # 1. Main log subscription (Try Global account instead of Program ID)
-        # Every Create/Swap/etc mentions the Global account: 4wTVyH7jzP...
+        # 1. Main log subscription (Use Program ID per reference snippet)
         subscribe_msg = {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "logsSubscribe",
             "params": [
-                {"mentions": [config.PUMP_FUN_GLOBAL]},
+                {"mentions": [config.PUMP_FUN_PROGRAM]},
                 {"commitment": "processed"}
             ]
         }
-        logger.info(f"Subscribing to Account: {config.PUMP_FUN_GLOBAL} (processed)")
+        logger.info(f"Subscribing to Program Logs: {config.PUMP_FUN_PROGRAM[:10]}...")
         await self.ws.send_json(subscribe_msg)
 
         # 2. ALSO subscribe to slots to verify connection
@@ -334,11 +333,12 @@ class Scanner:
                         continue
 
                     # --- Detect Token Creation (Exact match from Algo-Sniper v2) ---
-                    if "Program log: Instruction: Create" in str(logs):
+                    logs_str = " ".join(str(l) for l in logs)
+                    if "Instruction: Create" in logs_str:
                         logger.info(f"🚀 [LAUNCH] {signature[:10]}... NEW TOKEN DETECTED")
                         await self.process_log_entry(value)
                     else:
-                        if self.total_logs_received % 100 == 0:
+                        if self.total_logs_received % 25 == 0:
                             logger.info(f"[LOGS] {signature[:10]}... processing ({len(logs)} logs)")
                     continue
                 
