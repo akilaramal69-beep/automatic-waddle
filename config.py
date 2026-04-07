@@ -29,6 +29,7 @@ class Config:
     WALLET_PRIVATE_KEY: str = os.getenv("WALLET_PRIVATE_KEY", "")
     RPC_URL: str = os.getenv("RPC_URL", "https://mainnet.helius-rpc.com")
     WSS_URL: str = os.getenv("WSS_URL", "wss://mainnet.helius-rpc.com")
+    PUBLIC_WSS_URL: str = "wss://api.mainnet-beta.solana.com"
     
     TRADE_AMOUNT_SOL: float = float(os.getenv("TRADE_AMOUNT_SOL", "0.065"))
     MIN_PRIORITY_FEE: float = 0.0001
