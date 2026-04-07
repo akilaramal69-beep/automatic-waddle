@@ -170,22 +170,31 @@ class Scanner:
         return str(Pubkey.__new__(Pubkey, seeds[1]))
 
     async def _extract_from_transaction(self, signature: str, logs_hint: list = None) -> Optional[Dict[str, Any]]:
-        try:
-            url = f"{config.RPC_URL}?api-key={config.HELIUS_API_KEY}"
-            async with self.session.post(url, json={
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "getTransaction",
-                "params": [
-                    signature,
-                    {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}
-                ]
-            }) as resp:
-                data = await resp.json()
-                if "result" in data and data["result"]:
-                    tx = data["result"]
-                    message = tx.get("transaction", {}).get("message", {})
+        """Fetch full transaction with retries to handle RPC indexing latency."""
+        url = f"{config.RPC_URL}?api-key={config.HELIUS_API_KEY}"
+        
+        for attempt in range(5):
+            try:
+                async with self.session.post(url, json={
+                    "jsonrpc": "2.0", "id": f"tx-{signature[:5]}",
+                    "method": "getTransaction",
+                    "params": [
+                        signature,
+                        {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}
+                    ]
+                }) as resp:
+                    data = await resp.json()
+                    result = data.get("result")
+                    if not result:
+                        logger.info(f"Tx {signature[:10]} not yet indexed (attempt {attempt+1}/5). Waiting 1.5s...")
+                        await asyncio.sleep(1.5)
+                        continue
 
+                    tx = result
+                    message = tx.get("transaction", {}).get("message", {})
+                    if not message:
+                        return None
+                    
                     accounts = []
                     account_keys = message.get("accountKeys", [])
                     for ak in account_keys:
@@ -193,6 +202,8 @@ class Scanner:
                             accounts.append(ak.get("pubkey", str(ak)))
                         else:
                             accounts.append(str(ak))
+
+                    instructions = message.get("instructions", [])
 
                     # --- Extraction Killer Robust Logic ---
                     # 1. First, check all instructions (including inner) for spl-token 'initializeMint'
@@ -233,9 +244,14 @@ class Scanner:
                                         "creator": creator,
                                         "bonding_curve": accounts[ix_accounts[2]] if len(ix_accounts) >= 3 and isinstance(ix_accounts[2], int) else None
                                     }
+                    return None # found result but no mint, stop retrying
 
-        except Exception as e:
-            logger.error(f"Failed to extract tx data: {e}")
+            except Exception as e:
+                logger.error(f"Attempt {attempt+1} failed for {signature[:10]}: {e}")
+                await asyncio.sleep(1.5)
+
+        logger.warning(f"Failed to extract mint after 5 attempts for {signature[:20]}")
+        return None
         logger.warning(f"Could not extract mint from tx: {signature[:20]}...")
         return None
 
