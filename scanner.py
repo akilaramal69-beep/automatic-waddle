@@ -341,6 +341,10 @@ class Scanner:
                         logger.info(f"🔍 [MATCH] {signature[:10]}... NEW TOKEN CANDIDATE (Pump:{pump_count} Create:{create_count})")
                         await self.process_log_entry(value)
                     else:
+                        # DEBUG: Log the first 3 non-matching frames to see log structure
+                        if self.total_logs_received <= 305 and self.total_logs_received > 300:
+                            logger.info(f"[DEBUG] Logs for {signature[:10]}: {str(logs)[:500]}...")
+
                         if self.total_logs_received % 100 == 0:
                             logger.info(f"[LOGS] {signature[:10]}... processing ({len(logs)} logs)")
                     continue
