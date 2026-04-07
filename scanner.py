@@ -222,7 +222,8 @@ class Scanner:
                                 return {
                                     "mint": mint,
                                     "creator": info.get("mintAuthority") or signature[:44],
-                                    "bonding_curve": None
+                                    "bonding_curve": None,
+                                    "tx_data": tx # Pass full raw transaction for deeper scoring
                                 }
 
                     # 2. Fallback: Direct Pump.fun 'create' instruction parsing
@@ -242,7 +243,8 @@ class Scanner:
                                     return {
                                         "mint": mint_addr,
                                         "creator": creator,
-                                        "bonding_curve": accounts[ix_accounts[2]] if len(ix_accounts) >= 3 and isinstance(ix_accounts[2], int) else None
+                                        "bonding_curve": accounts[ix_accounts[2]] if len(ix_accounts) >= 3 and isinstance(ix_accounts[2], int) else None,
+                                        "tx_data": tx # Pass full raw transaction for deeper scoring
                                     }
                     return None # found result but no mint, stop retrying
 
@@ -466,7 +468,7 @@ class Scanner:
             )
 
             logger.info(f"Calling algo.score_token for {mint[:20]}...")
-            score_result = await self.algo.score_token(pump_token)
+            score_result = await self.algo.score_token(pump_token, tx_data=token_info.get("tx_data"))
             logger.info(f"Score result: {score_result}")
 
             pump_token.score = score_result["score"]

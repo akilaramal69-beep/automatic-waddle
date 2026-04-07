@@ -35,7 +35,7 @@ class AlgoScorer:
             self.session = aiohttp.ClientSession()
         return self.session
 
-    async def score_token(self, pump_token) -> Dict[str, Any]:
+    async def score_token(self, pump_token, tx_data: Optional[Dict] = None) -> Dict[str, Any]:
         session = await self._get_session()
 
         # 1. Authority Check
@@ -49,12 +49,19 @@ class AlgoScorer:
                 "creator_history": {"coins_per_hour": 0, "recent_coins": []}
             }
 
-        # 2. Dev Current Holding Check (Modern way)
-        dev_holding_pct = await self._check_dev_token_balance(
+        # 2. Dev Buy Check (Launch Block vs Current)
+        dev_buy_pct = 0.0
+        if tx_data:
+            dev_buy_pct = self._extract_dev_buy_from_tx(tx_data, pump_token.mint, pump_token.creator)
+        
+        # Fallback/Supplemental: Direct balance check
+        current_holding = await self._check_dev_token_balance(
             pump_token.mint,
             pump_token.creator,
             session
         )
+        # Take the maximum — if they bought in block 0 and still hold it, or bought more
+        dev_holding_pct = max(dev_buy_pct, current_holding)
 
         # 3. Creator History Check (Previous coins)
         creator_history = await self._check_creator_history(
@@ -165,20 +172,37 @@ class AlgoScorer:
             return None
 
     def _extract_dev_buy_from_tx(self, tx_data: Dict, mint: str, creator: str) -> float:
-        if not tx_data or "transaction" not in tx_data:
+        """
+        Parses postTokenBalances from the launch transaction to identify 
+        exactly how much the creator bought in the first block.
+        """
+        if not tx_data:
             return 0.0
 
         try:
-            message = tx_data["transaction"]["message"]
-            instructions = message.get("instructions", [])
+            meta = tx_data.get("meta", {})
+            if not meta:
+                return 0.0
 
-            for ix in instructions:
-                if isinstance(ix, dict):
-                    if ix.get("program") == "system" or ix.get("parsed", {}).get("type") == "transfer":
-                        return 0.05
+            post_balances = meta.get("postTokenBalances", [])
+            total_dev_tokens = 0.0
 
-            return 0.0
-        except Exception:
+            for entry in post_balances:
+                entry_mint = entry.get("mint")
+                entry_owner = entry.get("owner")
+                
+                if entry_mint == mint and entry_owner == creator:
+                    amount_info = entry.get("uiTokenAmount", {})
+                    total_dev_tokens += float(amount_info.get("uiAmount", 0) or 0)
+
+            # Pump.fun: 1B supply
+            buy_pct = total_dev_tokens / 1_000_000_000
+            if buy_pct > 0.01:
+                logger.info(f"📊 [LAUNCH BUY] Creator bought {buy_pct:.2%} in the launch block")
+            
+            return buy_pct
+        except Exception as e:
+            logger.debug(f"Error extracting dev buy from tx balance metadata: {e}")
             return 0.0
 
     async def _check_creator_history(
