@@ -43,6 +43,9 @@ class Scanner:
         self.scanned_tokens: Dict[str, PumpToken] = {}
         self.token_callback = callback
         self.simulation_mode = False
+        self.use_public_wss = False
+        self.last_msg_time = time.time()
+        self.total_logs_received = 0
 
     async def start(self):
         """Always connect to real Helius WebSocket — sim mode only affects trade execution."""
@@ -59,35 +62,49 @@ class Scanner:
             await self.session.close()
         self.session = aiohttp.ClientSession()
 
-        ws_url = f"{config.WSS_URL}?api-key={config.HELIUS_API_KEY}"
-        logger.info(f"Connecting WebSocket: {ws_url[:60]}...")
+        if self.use_public_wss:
+            ws_url = config.PUBLIC_WSS_URL
+            logger.info(f"Connecting to PUBLIC WebSocket: {ws_url}")
+        else:
+            ws_url = f"{config.WSS_URL}?api-key={config.HELIUS_API_KEY}"
+            logger.info(f"Connecting to HELIUS WebSocket: {ws_url[:50]}...")
 
-        # NO heartbeat= param — Helius manages its own keep-alive
         self.ws = await self.session.ws_connect(
             ws_url,
-            receive_timeout=120,
-            max_msg_size=0
+            receive_timeout=120
         )
         logger.info("WebSocket TCP connection established")
 
-        # 1. Main log subscription (mentions Pump.fun)
+        # 1. Main log subscription (Try Global account instead of Program ID)
+        # Every Create/Swap/etc mentions the Global account: 4wTVyH7jzP...
         subscribe_msg = {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "logsSubscribe",
             "params": [
-                {"mentions": [config.PUMP_FUN_PROGRAM]},
-                {"commitment": "confirmed"}
+                {"mentions": [config.PUMP_FUN_GLOBAL]},
+                {"commitment": "processed"}
             ]
         }
-        logger.info(f"Subscribing to: {config.PUMP_FUN_PROGRAM} (confirmed)")
+        logger.info(f"Subscribing to Account: {config.PUMP_FUN_GLOBAL} (processed)")
         await self.ws.send_json(subscribe_msg)
 
-        # 2. ALSO subscribe to All logs briefly if needed, but for now just slots to verify connection
+        # 2. ALSO subscribe to slots to verify connection
         await self.ws.send_json({
             "jsonrpc": "2.0", "id": 2, "method": "slotSubscribe"
         })
-        logger.info("Diagnostic slotSubscribe sent")
+
+        # 3. Diagnostic: Sub to Program updates directly (Noisy but bypasses log filters)
+        await self.ws.send_json({
+            "jsonrpc": "2.0", 
+            "id": 3, 
+            "method": "programSubscribe",
+            "params": [
+                config.PUMP_FUN_PROGRAM,
+                {"commitment": "processed", "encoding": "jsonParsed"}
+            ]
+        })
+        logger.info("Subscriptions sent: Logs + Slots + ProgramUpdates")
 
         # Read the confirmation — skip non-TEXT frames (e.g. PING)
         sub_id = None
@@ -260,11 +277,18 @@ class Scanner:
             try:
                 msg = await asyncio.wait_for(self.ws.receive(), timeout=90)
                 msg_count += 1
+                self.last_msg_time = time.time()
 
-                # --- status heartbeat every 60s ---
-                if time.time() - last_status > 60:
-                    logger.info(f"[SCANNER] Alive — {msg_count} WS frames received so far")
+                # --- status heartbeat every ~30s ---
+                if time.time() - last_status > 30:
+                    logger.info(f"[SCANNER] Alive — {msg_count} WS frames | {self.total_logs_received} logs")
                     last_status = time.time()
+                    
+                    # ROTATION LOGIC: If we have >200 frames (mostly slots) but 0 logs, try public
+                    if msg_count > 200 and self.total_logs_received == 0 and not self.use_public_wss:
+                        logger.warning("!!! [SCANNER] Connection alive but 0 logs received. Switching to PUBLIC SOLANA RPC...")
+                        self.use_public_wss = True
+                        raise asyncio.TimeoutError("Force rotation to Public WSS")
 
                 # --- log every frame type at INFO so we can see what's arriving ---
                 if msg.type == aiohttp.WSMsgType.PING:
@@ -292,75 +316,69 @@ class Scanner:
                     # Log more frames initially to see slotSubscribe working
                     logger.info(f"[WS] Frame #{msg_count}: type={msg.type} data={str(data)[:200]}")
 
-                # --- Handle slotSubscribe just for connectivity check ---
-                if data.get("method") == "slotNotification":
-                    if msg_count % 5 == 0:
+                # --- Handle Notifications ---
+                method = data.get("method")
+                if method == "logsNotification":
+                    self.total_logs_received += 1
+                    params = data.get("params", {})
+                    result = params.get("result", {})
+                    value = result.get("value", {})
+                    if not value or not isinstance(value, dict):
+                        continue
+
+                    logs = value.get("logs", [])
+                    signature = value.get("signature", "")
+                    if not logs or not signature:
+                        continue
+                    if value.get("err"):
+                        continue
+
+                    # --- Detect Token Creation ---
+                    logs_str = " ".join(str(l) for l in logs)
+                    if any(kw in logs_str for kw in ["Instruction: Create", "InitializeMint", "initialize_mint", "CreateToken"]):
+                        logger.info(f"🔍 [LOGS] {signature[:10]}... NEW TOKEN CANDIDATE")
+                        await self.process_log_entry(value)
+                    else:
+                        if self.total_logs_received % 100 == 0:
+                            logger.info(f"[LOGS] {signature[:10]}... processing ({len(logs)} logs)")
+                    continue
+                
+                elif method == "programNotification":
+                    self.total_logs_received += 1
+                    if self.total_logs_received % 100 == 0:
+                        res = data.get("params", {}).get("result", {})
+                        pk = res.get("value", {}).get("pubkey", "Unknown")
+                        logger.info(f"[PROG] Activity detected on {pk[:10]}...")
+                    continue
+
+                elif method == "slotNotification":
+                    if msg_count % 10 == 0:
                         logger.info(f"[WS] Connection OK — Slot: {data['params']['result']['slot']}")
                     continue
-
-                # --- extract notification ---
-                params = data.get("params")
-                if not params:
-                    logger.debug(f"[WS] Non-notification frame: {str(data)[:200]}")
-                    continue
-
-                result = params.get("result", {})
-                if not isinstance(result, dict):
-                    continue
-
-                value = result.get("value", {})
-                if not isinstance(value, dict):
-                    continue
-
-                logs = value.get("logs", [])
-                signature = value.get("signature", "")
-                err = value.get("err")
-
-                if not logs or not signature:
-                    continue
-
-                # Skip failed transactions
-                if err:
-                    continue
-
-                # --- detect token creation ---
-                logs_str = " ".join(str(l) for l in logs)
-                is_create = any(kw in logs_str for kw in [
-                    "Instruction: Create",
-                    "InitializeMint",
-                    "initialize_mint",
-                    "create_token",
-                    "CreateToken",
-                ])
-                has_pump = config.PUMP_FUN_PROGRAM[:8] in logs_str or "6EF8" in logs_str
-
-                logger.info(
-                    f"[TX] {signature[:20]}... create={is_create} pump={has_pump} "
-                    f"logs={len(logs)}"
-                )
-
-                if has_pump and is_create:
-                    logger.info(f"🔍 New token candidate! Fetching TX: {signature[:20]}...")
-                    token_info = await self._extract_from_transaction(signature, logs)
-                    if token_info and token_info.get("mint"):
-                        logger.info(f"✅ Extracted mint: {token_info['mint'][:20]}...")
-                        await self._handle_new_token(token_info)
-
             except asyncio.TimeoutError:
                 logger.warning(
                     f"[SCANNER] No WS message in 90s (total frames received: {msg_count}) "
-                    f"— closing and reconnecting"
+                    "— closing and reconnecting"
                 )
                 # Force reconnect — a silent timeout usually means the connection is dead
                 if self.ws and not self.ws.closed:
                     await self.ws.close()
                 self.ws = None
-                last_status = time.time()
-            except asyncio.CancelledError:
-                break
             except Exception as e:
-                logger.error(f"[SCANNER] Unexpected error: {e}", exc_info=True)
+                logger.error(f"[SCANNER] WS Loop error: {e}")
+                self.ws = None
                 await asyncio.sleep(2)
+
+    async def process_log_entry(self, value: Dict[str, Any]):
+        """Helper to extract token info from a log entry and trigger handling."""
+        logs = value.get("logs", [])
+        signature = value.get("signature", "")
+        
+        # --- detect token creation ---
+        token_info = await self._extract_from_transaction(signature, logs)
+        if token_info and token_info.get("mint"):
+            logger.info(f"✅ Extracted mint: {token_info['mint'][:20]}...")
+            await self._handle_new_token(token_info)
 
     async def run_simulation_loop(self, interval_seconds: int = 60):
         """Generate mock token events in simulation mode so trades actually trigger."""
