@@ -31,7 +31,7 @@ class Config:
     WSS_URL: str = os.getenv("WSS_URL", "wss://mainnet.helius-rpc.com")
     PUBLIC_WSS_URL: str = "wss://api.mainnet-beta.solana.com"
     
-    TRADE_AMOUNT_SOL: float = float(os.getenv("TRADE_AMOUNT_SOL", "0.065"))
+    TRADE_AMOUNT_SOL: float = float(os.getenv("TRADE_AMOUNT_SOL", "0.066"))
     MIN_PRIORITY_FEE: float = 0.0001
     MAX_PRIORITY_FEE: float = 0.005
     
@@ -61,8 +61,8 @@ class Config:
     MAX_CREATOR_COINS_PER_HOUR: int = 3
     DEV_BUY_THRESHOLD: float = 0.15
     
-    PROFIT_TARGET_1: float = float(os.getenv("PROFIT_TARGET_1", "0.50"))      # 50%
-    SELL_PORTION_1: float = float(os.getenv("SELL_PORTION_1", "0.50"))       # Sell 50% at target 1
+    PROFIT_TARGET_1: float = float(os.getenv("PROFIT_TARGET_1", "0.25"))      # +25% Micro-Sniper
+    SELL_PORTION_1: float = float(os.getenv("SELL_PORTION_1", "1.0"))       # Sell 100%
     TRAILING_STOP_LOSS: float = float(os.getenv("TRAILING_STOP_LOSS", "-0.20")) # -20% from peak
     STOP_LOSS_THRESHOLD: float = float(os.getenv("STOP_LOSS_THRESHOLD", "-0.30")) # -30% hard stop
 

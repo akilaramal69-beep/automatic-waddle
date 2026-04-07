@@ -333,18 +333,11 @@ class Scanner:
                     if value.get("err"):
                         continue
 
-                    # --- Detect Token Creation (Improved logic from reference repo) ---
-                    pump_count = sum(1 for l in logs if config.PUMP_FUN_PROGRAM[:4] in str(l))
-                    create_count = sum(1 for l in logs if "Create" in str(l))
-
-                    if pump_count >= 2 and create_count > 0:
-                        logger.info(f"🔍 [MATCH] {signature[:10]}... NEW TOKEN CANDIDATE (Pump:{pump_count} Create:{create_count})")
+                    # --- Detect Token Creation (Exact match from Algo-Sniper v2) ---
+                    if "Program log: Instruction: Create" in str(logs):
+                        logger.info(f"🚀 [LAUNCH] {signature[:10]}... NEW TOKEN DETECTED")
                         await self.process_log_entry(value)
                     else:
-                        # DEBUG: Log the first 3 non-matching frames to see log structure
-                        if self.total_logs_received <= 305 and self.total_logs_received > 300:
-                            logger.info(f"[DEBUG] Logs for {signature[:10]}: {str(logs)[:500]}...")
-
                         if self.total_logs_received % 100 == 0:
                             logger.info(f"[LOGS] {signature[:10]}... processing ({len(logs)} logs)")
                     continue
