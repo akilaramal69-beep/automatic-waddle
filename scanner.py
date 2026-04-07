@@ -70,7 +70,7 @@ class Scanner:
         )
         logger.info("WebSocket TCP connection established")
 
-        # params MUST be an array per Solana JSON-RPC spec
+        # 1. Main log subscription (mentions Pump.fun)
         subscribe_msg = {
             "jsonrpc": "2.0",
             "id": 1,
@@ -80,13 +80,14 @@ class Scanner:
                 {"commitment": "confirmed"}
             ]
         }
-        logger.info(f"Subscribing to program: {config.PUMP_FUN_PROGRAM} (confirmed)")
+        logger.info(f"Subscribing to: {config.PUMP_FUN_PROGRAM} (confirmed)")
         await self.ws.send_json(subscribe_msg)
 
-        # Also subscribe to slots just to verify data is flowing
+        # 2. ALSO subscribe to All logs briefly if needed, but for now just slots to verify connection
         await self.ws.send_json({
             "jsonrpc": "2.0", "id": 2, "method": "slotSubscribe"
         })
+        logger.info("Diagnostic slotSubscribe sent")
 
         # Read the confirmation — skip non-TEXT frames (e.g. PING)
         sub_id = None
