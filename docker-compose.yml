@@ -3,6 +3,7 @@ services:
     build: .
     restart: always
     environment:
+      - PYTHONUNBUFFERED=1
       - HELIUS_API_KEY=${HELIUS_API_KEY}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}

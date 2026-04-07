@@ -1,18 +1,31 @@
 name: pump-sniper-bot
 regions:
   - nyc
-instances:
-  type: free
 services:
   - name: sniper-bot
+    type: worker
     github:
       repository: your-username/your-repo
       branch: main
+    build:
+      builder: dockerfile
     run:
-      command: python main.py
-      port: 8000
+      command: python -u main.py
+    ports:
+      - port: 8000
+        protocol: http
     env:
-      - HELIUS_API_KEY=${HELIUS_API_KEY}
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
-      - WALLET_PRIVATE_KEY=${WALLET_PRIVATE_KEY}
+      - name: PYTHONUNBUFFERED
+        value: "1"
+      - name: HELIUS_API_KEY
+        value: ""   # Set via Koyeb dashboard secrets
+      - name: TELEGRAM_BOT_TOKEN
+        value: ""   # Set via Koyeb dashboard secrets
+      - name: TELEGRAM_CHAT_ID
+        value: ""   # Set via Koyeb dashboard secrets
+      - name: WALLET_PRIVATE_KEY
+        value: ""   # Set via Koyeb dashboard secrets
+      - name: SIMULATION_MODE
+        value: "false"
+    instance_types:
+      - type: free

@@ -10,6 +10,7 @@ import signal
 import sys
 import os
 from datetime import datetime
+from aiohttp import web
 
 from config import config
 from scanner import Scanner
@@ -23,6 +24,24 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Minimal HTTP server — Koyeb requires the process to bind to a port.
+# Without this the health check fails and the container is silently restarted.
+# ---------------------------------------------------------------------------
+async def health_handler(request):
+    return web.Response(text="OK")
+
+async def start_health_server():
+    port = int(os.getenv("PORT", "8000"))
+    app = web.Application()
+    app.router.add_get("/", health_handler)
+    app.router.add_get("/health", health_handler)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logger.info(f"Health-check server listening on port {port}")
 
 class SniperBot:
     def __init__(self):
@@ -150,6 +169,9 @@ class SniperBot:
         logger.info("Bot stopped")
 
 async def main():
+    # Start HTTP health-check server first so Koyeb sees an open port right away
+    await start_health_server()
+
     bot = SniperBot()
 
     def signal_handler(sig, frame):
