@@ -77,11 +77,16 @@ class Scanner:
             "method": "logsSubscribe",
             "params": [
                 {"mentions": [config.PUMP_FUN_PROGRAM]},
-                {"commitment": "processed"}
+                {"commitment": "confirmed"}
             ]
         }
-        logger.info(f"Subscribing to program: {config.PUMP_FUN_PROGRAM}")
+        logger.info(f"Subscribing to program: {config.PUMP_FUN_PROGRAM} (confirmed)")
         await self.ws.send_json(subscribe_msg)
+
+        # Also subscribe to slots just to verify data is flowing
+        await self.ws.send_json({
+            "jsonrpc": "2.0", "id": 2, "method": "slotSubscribe"
+        })
 
         # Read the confirmation — skip non-TEXT frames (e.g. PING)
         sub_id = None
@@ -282,9 +287,15 @@ class Scanner:
                     logger.warning(f"[WS] Failed to parse JSON: {e} | raw={msg.data[:200]}")
                     continue
 
-                # Log first 5 messages in full so we can debug the schema
-                if msg_count <= 5:
-                    logger.info(f"[WS] Frame #{msg_count}: {str(data)[:400]}")
+                if msg_count <= 20:
+                    # Log more frames initially to see slotSubscribe working
+                    logger.info(f"[WS] Frame #{msg_count}: type={msg.type} data={str(data)[:200]}")
+
+                # --- Handle slotSubscribe just for connectivity check ---
+                if data.get("method") == "slotNotification":
+                    if msg_count % 5 == 0:
+                        logger.info(f"[WS] Connection OK — Slot: {data['params']['result']['slot']}")
+                    continue
 
                 # --- extract notification ---
                 params = data.get("params")

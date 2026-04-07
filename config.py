@@ -28,7 +28,7 @@ class Config:
     TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")
     WALLET_PRIVATE_KEY: str = os.getenv("WALLET_PRIVATE_KEY", "")
     RPC_URL: str = os.getenv("RPC_URL", "https://mainnet.helius-rpc.com")
-    WSS_URL: str = os.getenv("WSS_URL", "wss://mainnet.helius-rpc.com")
+    WSS_URL: str = os.getenv("WSS_URL", "wss://atlas-mainnet.helius-rpc.com")
     
     TRADE_AMOUNT_SOL: float = float(os.getenv("TRADE_AMOUNT_SOL", "0.065"))
     MIN_PRIORITY_FEE: float = 0.0001
