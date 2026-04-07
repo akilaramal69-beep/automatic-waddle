@@ -194,9 +194,8 @@ class Scanner:
                         else:
                             accounts.append(str(ak))
 
-                    instructions = message.get("instructions", [])
-                    # --- Robust Extraction ---
-                    # 1. Look for SPL Token InitializeMint instructions (Most reliable)
+                    # --- Extraction Killer Robust Logic ---
+                    # 1. First, check all instructions (including inner) for spl-token 'initializeMint'
                     all_instructions = instructions.copy()
                     inner_ixs = tx.get("meta", {}).get("innerInstructions", [])
                     for inner in inner_ixs:
@@ -207,31 +206,33 @@ class Scanner:
                         if isinstance(parsed, dict) and parsed.get("type") in ["initializeMint", "initializeMint2"]:
                             info = parsed.get("info", {})
                             mint = info.get("mint")
-                            if mint:
-                                logger.info(f"✨ Found Mint via SPL: {mint[:15]}...")
+                            if mint and str(mint).endswith('pump'):
+                                logger.info(f"✨ [SPL Match] Mint identified: {mint[:15]}...")
                                 return {
                                     "mint": mint,
                                     "creator": info.get("mintAuthority") or signature[:44],
                                     "bonding_curve": None
                                 }
 
-                    # 2. Fallback: Parse Pump.fun 'create' instruction directly
+                    # 2. Fallback: Direct Pump.fun 'create' instruction parsing
                     for ix in instructions:
                         p_id_idx = ix.get("programIdIndex")
                         p_id = accounts[p_id_idx] if isinstance(p_id_idx, int) and p_id_idx < len(accounts) else str(ix.get("programId", ""))
                         
                         if config.PUMP_FUN_PROGRAM[:8] in str(p_id):
                             ix_accounts = ix.get("accounts", [])
-                            if len(ix_accounts) >= 10:
-                                # Pump.fun: [mint, mint_auth, bonding, assoc_bonding, global, spl, system, rent, fee, creator]
-                                mint = accounts[ix_accounts[0]] if isinstance(ix_accounts[0], int) else str(ix_accounts[0])
-                                creator = accounts[ix_accounts[9]] if isinstance(ix_accounts[9], int) else str(ix_accounts[9])
-                                bonding = accounts[ix_accounts[2]] if isinstance(ix_accounts[2], int) else str(ix_accounts[2])
-                                return {
-                                    "mint": mint,
-                                    "creator": creator,
-                                    "bonding_curve": bonding
-                                }
+                            if len(ix_accounts) >= 1:
+                                mint_idx = ix_accounts[0]
+                                mint_addr = accounts[mint_idx] if isinstance(mint_idx, int) and mint_idx < len(accounts) else str(mint_idx)
+                                
+                                if mint_addr.endswith('pump'):
+                                    logger.info(f"🚀 [Robust Match] Mint: {mint_addr[:15]}...")
+                                    creator = accounts[ix_accounts[9]] if len(ix_accounts) >= 10 and isinstance(ix_accounts[9], int) else signature[:44]
+                                    return {
+                                        "mint": mint_addr,
+                                        "creator": creator,
+                                        "bonding_curve": accounts[ix_accounts[2]] if len(ix_accounts) >= 3 and isinstance(ix_accounts[2], int) else None
+                                    }
 
         except Exception as e:
             logger.error(f"Failed to extract tx data: {e}")
