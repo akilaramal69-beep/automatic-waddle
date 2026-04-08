@@ -278,8 +278,12 @@ class AlgoScorer:
 
         coins_per_hour = creator_history.get("coins_per_hour", 0)
         if coins_per_hour > config.MAX_CREATOR_COINS_PER_HOUR:
-            score = 0
-            logger.warning(f"Creator launched {coins_per_hour} coins in 1 hour")
+            if coins_per_hour > 12: # Critical threshold
+                score = 0
+                logger.warning(f"Critical: Creator activity extremely high ({coins_per_hour} tx/hr)")
+            else:
+                score -= 30
+                logger.warning(f"High activity: Creator has {coins_per_hour} tx in 1 hour")
 
         if pump_token.has_mint_authority:
             score = 0

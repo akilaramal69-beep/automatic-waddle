@@ -40,7 +40,7 @@ class Config:
     PUMP_FUN_FEE_RECIPIENT: str = "CebN5WGCcP97GrS9bde96Xy2uB7rFpDMYhDMTWCH1nN5"
     PUMP_FUN_CREATE_PREFIX: bytes = bytes.fromhex("507270466d7359")
     
-    SIMULATION_BALANCE_SOL: float = 0.15
+    SIMULATION_BALANCE_SOL: float = 2.0
     SIMULATION_MODE: bool = os.getenv("SIMULATION_MODE", "false").lower() == "true"
     
     JITO_ENDPOINTS: list = field(default_factory=lambda: [
@@ -58,7 +58,7 @@ class Config:
         "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"   # USDT
     ])
 
-    MAX_CREATOR_COINS_PER_HOUR: int = 3
+    MAX_CREATOR_COINS_PER_HOUR: int = 6
     DEV_BUY_THRESHOLD: float = 0.15
     
     PROFIT_TARGET_1: float = float(os.getenv("PROFIT_TARGET_1", "0.25"))      # +25% Micro-Sniper
