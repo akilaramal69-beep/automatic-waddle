@@ -195,13 +195,17 @@ class Scanner:
                     if not message:
                         return None
                     
+                    # --- Account Resolution ---
                     accounts = []
                     account_keys = message.get("accountKeys", [])
-                    for ak in account_keys:
-                        if isinstance(ak, dict):
-                            accounts.append(ak.get("pubkey", str(ak)))
-                        else:
-                            accounts.append(str(ak))
+                    signer = signature[:44] # Default to sig if resolution fails
+                    
+                    for i, ak in enumerate(account_keys):
+                        pubkey = ak.get("pubkey", str(ak)) if isinstance(ak, dict) else str(ak)
+                        accounts.append(pubkey)
+                        # The first signer in accountKeys is historically the fee payer (the dev)
+                        if i == 0:
+                            signer = pubkey
 
                     instructions = message.get("instructions", [])
 
@@ -218,12 +222,12 @@ class Scanner:
                             info = parsed.get("info", {})
                             mint = info.get("mint")
                             if mint and str(mint).endswith('pump'):
-                                logger.info(f"✨ [SPL Match] Mint identified: {mint[:15]}...")
+                                logger.info(f"✨ [SPL Match] Mint: {mint[:15]}... | Dev: {signer[:10]}...")
                                 return {
                                     "mint": mint,
-                                    "creator": info.get("mintAuthority") or signature[:44],
+                                    "creator": signer,
                                     "bonding_curve": None,
-                                    "tx_data": tx # Pass full raw transaction for deeper scoring
+                                    "tx_data": tx 
                                 }
 
                     # 2. Fallback: Direct Pump.fun 'create' instruction parsing
@@ -238,13 +242,12 @@ class Scanner:
                                 mint_addr = accounts[mint_idx] if isinstance(mint_idx, int) and mint_idx < len(accounts) else str(mint_idx)
                                 
                                 if mint_addr.endswith('pump'):
-                                    logger.info(f"🚀 [Robust Match] Mint: {mint_addr[:15]}...")
-                                    creator = accounts[ix_accounts[9]] if len(ix_accounts) >= 10 and isinstance(ix_accounts[9], int) else signature[:44]
+                                    logger.info(f"🚀 [Robust Match] Mint: {mint_addr[:15]}... | Dev: {signer[:10]}...")
                                     return {
                                         "mint": mint_addr,
-                                        "creator": creator,
+                                        "creator": signer,
                                         "bonding_curve": accounts[ix_accounts[2]] if len(ix_accounts) >= 3 and isinstance(ix_accounts[2], int) else None,
-                                        "tx_data": tx # Pass full raw transaction for deeper scoring
+                                        "tx_data": tx
                                     }
                     return None # found result but no mint, stop retrying
 

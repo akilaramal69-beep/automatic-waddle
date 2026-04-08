@@ -37,6 +37,7 @@ class AlgoScorer:
 
     async def score_token(self, pump_token, tx_data: Optional[Dict] = None) -> Dict[str, Any]:
         session = await self._get_session()
+        logger.info(f"📊 [SCORING] Token: {pump_token.mint[:10]}... | Dev: {pump_token.creator[:10]}...")
 
         # 1. Authority Check
         has_mint_auth = await self._check_mint_authority(pump_token.mint, session)
@@ -253,6 +254,9 @@ class AlgoScorer:
                     "recent_coins": recent_coins
                 }
 
+                if coins_per_hour > 1:
+                    logger.info(f"🚩 [HISTORY] Dev {creator[:10]}... launched {coins_per_hour} coins in 1h")
+                
                 self.creator_cache[cache_key] = {"data": result, "time": float(current_time)}
                 return result
 
